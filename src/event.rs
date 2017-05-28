@@ -3,19 +3,22 @@ use std::io::{self, Write, stdout};
 use std::process::Command;
 use nats::*;
 use crossbeam::sync::SegQueue;
-use std::sync::mpsc::{Sender, Receiver};
-use std::sync::mpsc;
-use std::thread;
+use std::sync::mpsc::{Receiver};
+use std::sync::{Mutex, Arc};
 
-pub fn listen(rx: Receiver<String>) {
+pub fn listen(rx: Receiver<String>, ref_queue: Arc<SegQueue<String>>) {
 
     loop {
         println!("started");
         let s = rx.recv();
+
         match s {
             Ok(v) => println!("{msg}", msg=v.to_string()),
             Err(r) => println!("{msg}", msg=r.to_string()),
         }
+
+        let msg = ref_queue.try_pop().unwrap();
+        println!("queue {msg}", msg=msg);
     }
     //
     // for _ in client.events() {
