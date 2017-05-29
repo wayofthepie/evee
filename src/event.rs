@@ -1,36 +1,53 @@
-extern crate nats;
-use std::io::{self, Write, stdout};
-use std::process::Command;
-use nats::*;
-use crossbeam::sync::SegQueue;
-use std::sync::mpsc::{Receiver};
-use std::sync::{Mutex, Arc};
+use rocket_contrib::JSON;
+use uuid::Uuid;
 
-pub fn listen(rx: Receiver<String>, ref_queue: Arc<SegQueue<String>>) {
+#[derive(Deserialize, Serialize)]
+pub struct Event {
+    name: String,
+}
 
-    loop {
-        println!("started");
-        let s = rx.recv();
+#[derive(Deserialize, Serialize)]
+pub struct EventCreated {
+    id: Uuid,
+    event: Event,
+}
 
-        match s {
-            Ok(v) => println!("{msg}", msg=v.to_string()),
-            Err(r) => println!("{msg}", msg=r.to_string()),
-        }
+#[post("/event", format = "application/json", data = "<event>")]
+pub fn event(event: JSON<Event>) -> JSON<EventCreated> {
+    let created = EventCreated{ event: event.into_inner(), id: Uuid::new_v4() };
+    return JSON(created);
+}
 
-        let msg = ref_queue.try_pop().unwrap();
-        println!("queue {msg}", msg=msg);
+#[cfg(test)]
+mod tests {
+    use ::rocket;
+    use uuid::Uuid;
+    use rocket::testing::MockRequest;
+    use rocket::http::ContentType;
+    use rocket::http::Method::*;
+    use rocket::http::{Status};
+    use ::spectral::prelude::*;
+    use serde_json;
+
+    #[test]
+    fn test_post_event_success_returns_created_event() {
+        // Arrange
+        let rocket = rocket::ignite().mount("/", routes![super::event]);
+        let event = super::Event { name: "test".to_string() };
+        let event_json = serde_json::to_string(&event).unwrap();
+        let event_str: &str = &event_json.to_string();
+        let mut req = MockRequest::new(Post, "/event")
+            .header(ContentType::JSON)
+            .body(event_json);
+
+        // Act
+        let mut response = req.dispatch_with(&rocket);
+        let body_str = response.body().and_then(|b| b.into_string()).unwrap();
+        let created: super::EventCreated = serde_json::from_str(&body_str).unwrap();
+
+        // Assert
+        assert_eq!(response.status(), Status::Ok);
+        assert_that(&body_str).contains(event_str);
+        assert_that(&Uuid::parse_str(&created.id.to_string()).unwrap()).is_equal_to(created.id);
     }
-    //
-    // for _ in client.events() {
-    //     // // execute { "platform": "linux", "repo": "ssh://xyz.git", "init": "init.sh" }
-    //     // let output = Command::new("docker")
-    //     //         .args(&["run", "-d", "moon",
-    //     //             "git", "clone", "https://github.com/wayofthepie/emu-mos-6502",
-    //     //             "&&", "echo 'test'"
-    //     //             ])
-    //     //         .spawn()
-    //     //         .expect("ls command failed to start");
-    //
-    //     stdout().flush().ok().expect("Could not flush stdout");
-    // }
 }
